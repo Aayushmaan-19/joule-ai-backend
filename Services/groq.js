@@ -26,8 +26,6 @@ RULES:
 export async function askGroq(message) {
   try {
     const response = await groq.chat.completions.create({
-      // Note: llama-3.1-8b-instant is deprecated by Groq (shuts down
-      // 08/16/26). Migrated early to their recommended replacement.
       model: "openai/gpt-oss-20b",
 
       messages: [
