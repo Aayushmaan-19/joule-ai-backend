@@ -142,9 +142,9 @@ router.post("/verify-otp", verifyFirebase, async (req, res) => {
 
     await otpRef.delete();
 
-    await db.collection("users").doc(uid).update({
+    await db.collection("users").doc(uid).set({
       emailVerified: true
-    });
+    }, { merge: true });
 
     return res.json({
       success: true,
