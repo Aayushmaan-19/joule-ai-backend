@@ -12,15 +12,22 @@ const app = express();
 
 app.use(helmet());
 
+const ALLOWED_ORIGINS = [
+  /^http:\/\/127\.0\.0\.1:\d+$/,
+  /^http:\/\/localhost:\d+$/,
+  /^https:\/\/joule-ai(-[a-z0-9]+)*\.vercel\.app$/
+];
+
 app.use(
   cors({
-    origin: [
-      "http://127.0.0.1:5500",
-      "http://localhost:5500",
-      "http://127.0.0.1:5173",
-      "http://localhost:5173",
-      "https://joule-ai.vercel.app"
-    ],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+
+      const allowed = ALLOWED_ORIGINS.some(pattern => pattern.test(origin));
+      if (allowed) return callback(null, true);
+
+      callback(new Error(`CORS: origin not allowed — ${origin}`));
+    },
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"]
   })
