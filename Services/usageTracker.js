@@ -1,6 +1,6 @@
 import { getFirestore } from "firebase-admin/firestore";
 
-const GUEST_LIMIT_DISABLED = true;
+const GUEST_LIMIT_DISABLED = false;
 
 const GUEST_DAILY_LIMIT = 20;
 const VERIFIED_DAILY_LIMIT = 50;
@@ -11,17 +11,11 @@ function todayKey() {
 
 export async function checkAndConsumeGuestUsage(ip) {
   if (GUEST_LIMIT_DISABLED) {
-    return {
-      allowed: true,
-      remaining: Infinity,
-      limit: Infinity
-    };
+    return { allowed: true, remaining: Infinity, limit: Infinity };
   }
 
   const db = getFirestore();
-
   const safeId = ip.replace(/[/.:]/g, "_");
-
   const ref = db.collection("guestUsage").doc(safeId);
 
   return db.runTransaction(async (tx) => {
@@ -32,19 +26,12 @@ export async function checkAndConsumeGuestUsage(ip) {
     const used = isNewDay ? 0 : (data.messagesUsed || 0);
 
     if (used >= GUEST_DAILY_LIMIT) {
-      return {
-        allowed: false,
-        remaining: 0,
-        limit: GUEST_DAILY_LIMIT
-      };
+      return { allowed: false, remaining: 0, limit: GUEST_DAILY_LIMIT };
     }
 
     tx.set(
       ref,
-      {
-        messagesUsed: used + 1,
-        lastUsageDate: todayKey()
-      },
+      { messagesUsed: used + 1, lastUsageDate: todayKey() },
       { merge: true }
     );
 
@@ -68,19 +55,12 @@ export async function checkAndConsumeUserUsage(uid) {
     const used = isNewDay ? 0 : (data.messagesUsed || 0);
 
     if (used >= VERIFIED_DAILY_LIMIT) {
-      return {
-        allowed: false,
-        remaining: 0,
-        limit: VERIFIED_DAILY_LIMIT
-      };
+      return { allowed: false, remaining: 0, limit: VERIFIED_DAILY_LIMIT };
     }
 
     tx.set(
       ref,
-      {
-        messagesUsed: used + 1,
-        lastUsageDate: todayKey()
-      },
+      { messagesUsed: used + 1, lastUsageDate: todayKey() },
       { merge: true }
     );
 
@@ -92,8 +72,4 @@ export async function checkAndConsumeUserUsage(uid) {
   });
 }
 
-export {
-  GUEST_LIMIT_DISABLED,
-  GUEST_DAILY_LIMIT,
-  VERIFIED_DAILY_LIMIT
-};
+export { GUEST_LIMIT_DISABLED, GUEST_DAILY_LIMIT, VERIFIED_DAILY_LIMIT };

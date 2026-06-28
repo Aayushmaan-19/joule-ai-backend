@@ -2,7 +2,7 @@ import Groq from "groq-sdk";
 import "dotenv/config";
 
 const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
+  apiKey: process.env.GROQ_API_KEY
 });
 
 const SYSTEM_PROMPT = `
@@ -21,27 +21,36 @@ RULES:
 - Do not repeat the user question.
 - Always format output for readability.
 - Use emojis for extra emotions where needed.
+- Remember context from earlier in this conversation and refer back to it naturally.
 `;
 
-export async function askGroq(message) {
+/**
+ * Calls Groq with the current message AND the conversation history
+ * so the AI has full context of what was said before.
+ *
+ * @param {string} message - The latest user message
+ * @param {Array<{role: string, content: string}>} history - Prior turns,
+ *   already validated and trimmed by the route. Each item has role "user"|"bot"
+ *   which we convert to "user"|"assistant" for the API.
+ */
+export async function askGroq(message, history = []) {
   try {
+    const historyMessages = history.map(m => ({
+      role: m.role === "bot" ? "assistant" : "user",
+      content: m.content
+    }));
+
+    const messages = [
+      { role: "system", content: SYSTEM_PROMPT },
+      ...historyMessages,
+      { role: "user", content: message }
+    ];
+
     const response = await groq.chat.completions.create({
-      model: "openai/gpt-oss-20b",
-
-      messages: [
-        {
-          role: "system",
-          content: SYSTEM_PROMPT
-        },
-        {
-          role: "user",
-          content: message
-        }
-      ],
-
+      model: "llama-3.3-70b-versatile",
+      messages,
       temperature: 0.7,
-      max_completion_tokens: 800,
-      reasoning_effort: "low"
+      max_completion_tokens: 800
     });
 
     return (
@@ -50,7 +59,7 @@ export async function askGroq(message) {
     );
 
   } catch (err) {
-    console.error("🔥 GROQ ERROR:", err);
+    console.error("Groq error:", err.message);
 
     const detail =
       err?.error?.error?.message ||
