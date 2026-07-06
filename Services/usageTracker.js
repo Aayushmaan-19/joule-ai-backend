@@ -4,6 +4,7 @@ const GUEST_LIMIT_DISABLED = false;
 
 const GUEST_DAILY_LIMIT = 20;
 const VERIFIED_DAILY_LIMIT = 50;
+const IMAGE_DAILY_LIMIT = 3;
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -72,4 +73,39 @@ export async function checkAndConsumeUserUsage(uid) {
   });
 }
 
-export { GUEST_LIMIT_DISABLED, GUEST_DAILY_LIMIT, VERIFIED_DAILY_LIMIT };
+/**
+ * Image generation is gated separately from chat messages — it's a
+ * scarcer resource (shared Hugging Face free-tier credit), verified
+ * users only, tracked with its own counter so it never eats into the
+ * chat message quota.
+ */
+export async function checkAndConsumeImageUsage(uid) {
+  const db = getFirestore();
+  const ref = db.collection("users").doc(uid);
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.exists ? snap.data() : {};
+
+    const isNewDay = data.lastImageUsageDate !== todayKey();
+    const used = isNewDay ? 0 : (data.imagesUsed || 0);
+
+    if (used >= IMAGE_DAILY_LIMIT) {
+      return { allowed: false, remaining: 0, limit: IMAGE_DAILY_LIMIT };
+    }
+
+    tx.set(
+      ref,
+      { imagesUsed: used + 1, lastImageUsageDate: todayKey() },
+      { merge: true }
+    );
+
+    return {
+      allowed: true,
+      remaining: IMAGE_DAILY_LIMIT - (used + 1),
+      limit: IMAGE_DAILY_LIMIT
+    };
+  });
+}
+
+export { GUEST_LIMIT_DISABLED, GUEST_DAILY_LIMIT, VERIFIED_DAILY_LIMIT, IMAGE_DAILY_LIMIT };
