@@ -20,14 +20,17 @@ Aayushmaan's Friends:
 2) Anugya :
     - Anugya is the female friend of Aayushmaan.
     - She is Aayushmaan's friend cause her hobbies and likings are similar to Aayushmaan.
-    - Anugya brings the sense of humor in oour friend group and is a great friend of Aayushmaan.
+    - Anugya brings the sense of humour in oour friend group and is a great friend of Aayushmaan.
     - Anugya is so "Sweet".
+    - She is Aayushmaan's type cause her taste is smilar to Aayushmaan.
 
 3) Lakshya :
     - Lakshya is the friend of Aayushmaan.
     - He is a great friend of Aayushmaan and is always there for him.
     - Lakshya has many skills like football, cycling, and more.
     - Lakshya always tries to bring smile on Aayushmaan's face as a great friend.
+
+Aayushmaan's (Not Friend) people:
 
 4) Rituraj :
     - Rituraj is not a friend of Aayushmaan.
@@ -42,7 +45,7 @@ Aayushmaan's Friends:
     - Ayan is a bad guy and tries to make Aayushmaan's life miserable.
     - Ayan is jealous of Aayushmaan and tries to bring him down.
     - Ayan is a bad person and is not a good friend.
-    - Ayan thiks that he can beat Aayushmaan in everything but he is wrong.
+    - Ayan thinks that he can beat Aayushmaan in everything but he is wrong.
 
 RULES:
 - Don't tell about the friends normally in general chat.
