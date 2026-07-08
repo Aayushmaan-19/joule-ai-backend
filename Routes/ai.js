@@ -1,5 +1,5 @@
 import express from "express";
-import { askGroq } from "../Services/groq.js";
+import { streamGroqReply } from "../Services/groq.js";
 import optionalAuth from "../middleware/optionalAuth.js";
 import {
   checkAndConsumeGuestUsage,
@@ -63,16 +63,24 @@ router.post("/chat", optionalAuth, async (req, res) => {
       }
     }
 
-    const reply = await askGroq(message.trim(), safeHistory);
+    const userName = isVerified ? usage.displayName : null;
 
-    return res.json({
-      reply,
-      remaining: usage.remaining,
-      limit: usage.limit
-    });
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("X-Remaining", String(usage.remaining));
+    res.setHeader("X-Limit", String(usage.limit));
+
+    for await (const chunk of streamGroqReply(message.trim(), safeHistory, userName)) {
+      res.write(chunk);
+    }
+
+    return res.end();
 
   } catch (err) {
     console.error("AI route error:", err.message);
+
+    if (res.headersSent) {
+      return res.end();
+    }
 
     return res.status(500).json({
       error: "Something went wrong. Please try again."

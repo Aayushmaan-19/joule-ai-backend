@@ -68,7 +68,8 @@ export async function checkAndConsumeUserUsage(uid) {
     return {
       allowed: true,
       remaining: VERIFIED_DAILY_LIMIT - (used + 1),
-      limit: VERIFIED_DAILY_LIMIT
+      limit: VERIFIED_DAILY_LIMIT,
+      displayName: data.displayName || null
     };
   });
 }

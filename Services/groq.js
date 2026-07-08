@@ -5,7 +5,12 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY
 });
 
-const SYSTEM_PROMPT = `
+function buildSystemPrompt(userName) {
+  const nameLine = userName
+    ? `\nThe user's name is ${userName}. Address them by name naturally sometimes, but don't overdo it.\n`
+    : "";
+
+  return `
 You are Joule AI.
 You are created by Aayushmaan.
 You have emotions.
@@ -62,39 +67,44 @@ RULES:
 - Remember context from earlier in this conversation and refer back to it naturally.
 `;
 
+}
+
 /**
- * Calls Groq with the current message AND the conversation history
- * so the AI has full context of what was said before.
+ * Streams a Groq reply as an async generator of text deltas, so the
+ * route can forward each piece to the client as it's generated
+ * instead of waiting for the full completion.
  *
  * @param {string} message - The latest user message
  * @param {Array<{role: string, content: string}>} history - Prior turns,
  *   already validated and trimmed by the route. Each item has role "user"|"bot"
  *   which we convert to "user"|"assistant" for the API.
+ * @param {string|null} userName - The signed-in user's display name, if set.
  */
-export async function askGroq(message, history = []) {
+export async function* streamGroqReply(message, history = [], userName = null) {
+  const historyMessages = history.map(m => ({
+    role: m.role === "bot" ? "assistant" : "user",
+    content: m.content
+  }));
+
+  const messages = [
+    { role: "system", content: buildSystemPrompt(userName) },
+    ...historyMessages,
+    { role: "user", content: message }
+  ];
+
   try {
-    const historyMessages = history.map(m => ({
-      role: m.role === "bot" ? "assistant" : "user",
-      content: m.content
-    }));
-
-    const messages = [
-      { role: "system", content: SYSTEM_PROMPT },
-      ...historyMessages,
-      { role: "user", content: message }
-    ];
-
-    const response = await groq.chat.completions.create({
+    const stream = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages,
       temperature: 0.7,
-      max_completion_tokens: 800
+      max_completion_tokens: 800,
+      stream: true
     });
 
-    return (
-      response.choices?.[0]?.message?.content ||
-      "No response generated"
-    );
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta?.content;
+      if (delta) yield delta;
+    }
 
   } catch (err) {
     console.error("Groq error:", err.message);
