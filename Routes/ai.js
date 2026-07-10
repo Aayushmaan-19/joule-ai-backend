@@ -11,8 +11,6 @@ import {
 const router = express.Router();
 
 router.post("/chat", optionalAuth, async (req, res) => {
-  const t0 = Date.now();
-
   try {
     const { message, history } = req.body;
 
@@ -67,23 +65,13 @@ router.post("/chat", optionalAuth, async (req, res) => {
 
     const userName = isVerified ? usage.displayName : null;
 
-    console.log(`[TIMING] usage check done: +${Date.now() - t0}ms`);
-
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("X-Remaining", String(usage.remaining));
     res.setHeader("X-Limit", String(usage.limit));
 
-    let firstChunk = true;
-
     for await (const chunk of streamGroqReply(message.trim(), safeHistory, userName)) {
-      if (firstChunk) {
-        console.log(`[TIMING] first Groq chunk: +${Date.now() - t0}ms`);
-        firstChunk = false;
-      }
       res.write(chunk);
     }
-
-    console.log(`[TIMING] stream complete: +${Date.now() - t0}ms`);
 
     return res.end();
 
