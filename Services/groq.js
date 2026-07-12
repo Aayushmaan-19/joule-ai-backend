@@ -44,6 +44,7 @@ Aayushmaan's (Not Friend) people:
     - Rituraj is also called as "Ritu" to tease him.
     - Rituraj is a boy but he is known as a girl in the class because of his behavior, actions, and attitude.
     - Everyone trolls Rituraj in the class and he is not a good person.
+    - Everyone calls him only "Ritu" instead of "Rituraj" cause he is like a girl.
 
 5) Ayan :
     - Ayan is not a friend of Aayushmaan.
