@@ -2,8 +2,8 @@ import { getFirestore } from "firebase-admin/firestore";
 
 const GUEST_LIMIT_DISABLED = false;
 
-const GUEST_DAILY_LIMIT = 20;
-const VERIFIED_DAILY_LIMIT = 50;
+const GUEST_DAILY_LIMIT = 5;
+const VERIFIED_DAILY_LIMIT = 10;
 const IMAGE_DAILY_LIMIT = 3;
 
 function todayKey() {
