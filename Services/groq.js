@@ -99,7 +99,7 @@ export async function* streamGroqReply(message, history = [], userName = null) {
       // Joule real, server-side web search — weather, live scores,
       // anything current — with zero extra API keys or services.
       // It decides on its own whether a given message needs a search.
-      model: "groq/compound",
+      model: "groq/compound-mini",
       messages,
       temperature: 0.7,
       max_completion_tokens: 800,
