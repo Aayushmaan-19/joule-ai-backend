@@ -95,7 +95,11 @@ export async function* streamGroqReply(message, history = [], userName = null) {
 
   try {
     const stream = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      // Compound (not the plain llama-3.3-70b-versatile model) gives
+      // Joule real, server-side web search — weather, live scores,
+      // anything current — with zero extra API keys or services.
+      // It decides on its own whether a given message needs a search.
+      model: "groq/compound",
       messages,
       temperature: 0.7,
       max_completion_tokens: 800,
