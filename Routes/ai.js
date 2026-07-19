@@ -82,6 +82,20 @@ router.post("/chat", optionalAuth, async (req, res) => {
       return res.end();
     }
 
+    if (err.isRateLimit) {
+      const wait = err.retryAfterSeconds;
+
+      // Short, confirmed wait (what we've actually seen: Groq's per-minute
+      // token limit, clears in well under a minute) gets an exact
+      // countdown. Anything longer or unconfirmed gets honest, vaguer
+      // wording — "try tomorrow" would be a guess we can't back up.
+      const message = wait && wait <= 90
+        ? `Joule's getting a lot of requests right now — try again in about ${Math.ceil(wait)} seconds.`
+        : "Joule's hit its usage limit for the moment. Please try again shortly.";
+
+      return res.status(429).json({ error: message });
+    }
+
     return res.status(500).json({
       error: "Something went wrong. Please try again."
     });

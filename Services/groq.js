@@ -95,10 +95,16 @@ export async function* streamGroqReply(message, history = [], userName = null) {
 
   try {
     const stream = await groq.chat.completions.create({
-      // Compound (not the plain llama-3.3-70b-versatile model) gives
-      // Joule real, server-side web search — weather, live scores,
-      // anything current — with zero extra API keys or services.
-      // It decides on its own whether a given message needs a search.
+      // compound-mini (not compound, and not the plain
+      // llama-3.3-70b-versatile) gives Joule real, server-side web
+      // search — weather, live scores, anything current — with zero
+      // extra API keys or services. It decides on its own whether a
+      // given message needs a search.
+      // Using -mini specifically: compound allows multiple tool calls
+      // per request, each an internal round trip through gpt-oss-120b;
+      // compound-mini caps that at one, which cost less of that
+      // model's 8000 TPM free-tier budget per reply when we tested
+      // plain compound and hit that limit.
       model: "groq/compound-mini",
       messages,
       temperature: 0.7,
@@ -119,6 +125,16 @@ export async function* streamGroqReply(message, history = [], userName = null) {
       err?.message ||
       "Unknown Groq error";
 
-    throw new Error(`Groq API failed: ${detail}`);
+    const wrapped = new Error(`Groq API failed: ${detail}`);
+
+    // Groq's rate-limit responses are HTTP 429 with code
+    // "rate_limit_exceeded", and set a retry-after header with the
+    // exact wait in seconds — both more reliable than parsing the
+    // human-readable message text, which can change wording.
+    wrapped.isRateLimit =
+      err?.status === 429 || err?.error?.error?.code === "rate_limit_exceeded";
+    wrapped.retryAfterSeconds = Number(err?.headers?.["retry-after"]) || null;
+
+    throw wrapped;
   }
 }
