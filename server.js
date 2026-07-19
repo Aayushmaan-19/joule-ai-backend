@@ -8,6 +8,7 @@ import ttsRoute from "./Routes/tts.js";
 import transcribeRoute from "./Routes/transcribe.js";
 import authRoutes from "./Routes/auth.js";
 import imageRoutes from "./Routes/image.js";
+import wakeRoutes from "./Routes/wake.js";
 
 const app = express();
 
@@ -38,6 +39,7 @@ app.use(
 app.use(express.json({ limit: "10kb" }));
 
 app.use("/api/auth", authRoutes);
+app.use("/api/wake", wakeRoutes);
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,

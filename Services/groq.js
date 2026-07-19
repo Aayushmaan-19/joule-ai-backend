@@ -5,6 +5,22 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY
 });
 
+/**
+ * Proves Groq is actually reachable, for wake/health checks — not a
+ * chat turn. No system prompt (that's ~630 tokens on its own), no
+ * history, no streaming, smallest possible completion. Separate from
+ * streamGroqReply on purpose: waking the server shouldn't cost
+ * anywhere near what an actual reply costs.
+ */
+export async function pingGroq() {
+  await groq.chat.completions.create({
+    model: "groq/compound-mini",
+    messages: [{ role: "user", content: "ping" }],
+    max_completion_tokens: 5,
+    stream: false
+  });
+}
+
 function buildSystemPrompt(userName) {
   const nameLine = userName
     ? `\nThe user's name is ${userName}. Address them by name naturally sometimes, but don't overdo it.\n`
