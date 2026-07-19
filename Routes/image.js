@@ -4,6 +4,7 @@ import verifyFirebase from "../middleware/verifyFirebase.js";
 import { generateImage } from "../Services/huggingface.js";
 import {
   checkAndConsumeImageUsage,
+  refundImageUsage,
   IMAGE_DAILY_LIMIT
 } from "../Services/usageTracker.js";
 
@@ -49,7 +50,16 @@ router.post("/generate", imageLimiter, verifyFirebase, async (req, res) => {
       });
     }
 
-    const { buffer, contentType } = await generateImage(prompt.trim());
+    const { buffer, contentType } = await generateImage(prompt.trim())
+      .catch(async (genErr) => {
+        // Quota was consumed above to keep the check atomic against
+        // concurrent requests — refund it now, since this attempt
+        // never actually produced an image.
+        await refundImageUsage(req.user.uid).catch(refundErr =>
+          console.error("Usage refund failed:", refundErr.message)
+        );
+        throw genErr;
+      });
     const image = `data:${contentType};base64,${buffer.toString("base64")}`;
 
     return res.json({

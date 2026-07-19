@@ -4,6 +4,8 @@ import optionalAuth from "../middleware/optionalAuth.js";
 import {
   checkAndConsumeGuestUsage,
   checkAndConsumeUserUsage,
+  refundGuestUsage,
+  refundUserUsage,
   GUEST_DAILY_LIMIT,
   VERIFIED_DAILY_LIMIT
 } from "../Services/usageTracker.js";
@@ -35,9 +37,11 @@ router.post("/chat", optionalAuth, async (req, res) => {
     const isVerified = !!req.user && req.user.email_verified;
 
     let usage;
+    let refund;
 
     if (isVerified) {
       usage = await checkAndConsumeUserUsage(req.user.uid);
+      refund = () => refundUserUsage(req.user.uid);
 
       if (!usage.allowed) {
         return res.status(429).json({
@@ -53,6 +57,7 @@ router.post("/chat", optionalAuth, async (req, res) => {
         "unknown";
 
       usage = await checkAndConsumeGuestUsage(ip);
+      refund = () => refundGuestUsage(ip);
 
       if (!usage.allowed) {
         return res.status(429).json({
@@ -69,11 +74,20 @@ router.post("/chat", optionalAuth, async (req, res) => {
     res.setHeader("X-Remaining", String(usage.remaining));
     res.setHeader("X-Limit", String(usage.limit));
 
-    for await (const chunk of streamGroqReply(message.trim(), safeHistory, userName)) {
-      res.write(chunk);
+    try {
+      for await (const chunk of streamGroqReply(message.trim(), safeHistory, userName)) {
+        res.write(chunk);
+      }
+      return res.end();
+    } catch (streamErr) {
+      // Quota was consumed above to keep the check atomic against
+      // concurrent requests — refund it now, since this message
+      // never actually got a reply.
+      await refund().catch(refundErr =>
+        console.error("Usage refund failed:", refundErr.message)
+      );
+      throw streamErr;
     }
-
-    return res.end();
 
   } catch (err) {
     console.error("AI route error:", err.message);
