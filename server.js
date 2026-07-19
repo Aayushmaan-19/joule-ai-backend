@@ -12,6 +12,13 @@ import wakeRoutes from "./Routes/wake.js";
 
 const app = express();
 
+// Render sits as exactly one reverse-proxy hop in front of this app
+// and sets X-Forwarded-For accordingly. Without this, every rate
+// limiter here (and req.ip generally) sees Render's proxy address
+// instead of the real client — meaning every guest would share one
+// rate-limit bucket, not just a log warning.
+app.set("trust proxy", 1);
+
 app.use(helmet());
 
 const ALLOWED_ORIGINS = [
