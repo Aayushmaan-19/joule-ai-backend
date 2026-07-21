@@ -111,10 +111,9 @@ export async function refundUserUsage(uid) {
 }
 
 /**
- * Image generation is gated separately from chat messages — it's a
- * scarcer resource (shared Hugging Face free-tier credit), verified
- * users only, tracked with its own counter so it never eats into the
- * chat message quota.
+ * Image generation is gated separately from chat messages — its own
+ * deliberately small daily cap, verified users only, tracked with its
+ * own counter so it never eats into the chat message quota.
  */
 export async function checkAndConsumeImageUsage(uid) {
   const db = getFirestore();

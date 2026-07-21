@@ -1,7 +1,7 @@
 import express from "express";
 import rateLimit from "express-rate-limit";
 import verifyFirebase from "../middleware/verifyFirebase.js";
-import { generateImage } from "../Services/huggingface.js";
+import { generateImage } from "../Services/pollinations.js";
 import {
   checkAndConsumeImageUsage,
   refundImageUsage,
