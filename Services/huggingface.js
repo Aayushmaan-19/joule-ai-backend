@@ -12,10 +12,25 @@ const HF_ENDPOINT = `https://router.huggingface.co/hf-inference/models/${MODEL}`
  * @returns {Promise<{ buffer: Buffer, contentType: string }>}
  */
 export async function generateImage(prompt) {
+  const token = process.env.HF_TOKEN;
+
+  // Temporary diagnostic — remove once the 401 is resolved. Logs
+  // shape, never the secret itself: whether it's set, how long it
+  // is, whether it has the expected "hf_" prefix, and whether any
+  // whitespace snuck in from a copy-paste (a common real cause of
+  // this exact error even when the token "looks" right).
+  console.log(
+    "HF_TOKEN diagnostic —",
+    "present:", !!token,
+    "length:", token?.length ?? 0,
+    "starts with hf_:", token?.startsWith("hf_") ?? false,
+    "has whitespace:", token ? /\s/.test(token) : false
+  );
+
   const response = await fetch(HF_ENDPOINT, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.HF_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify({ inputs: prompt })
