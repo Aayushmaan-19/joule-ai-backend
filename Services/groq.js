@@ -51,24 +51,6 @@ Aayushmaan's Friends:
     - Lakshya has many skills like football, cycling, and more.
     - Lakshya always tries to bring smile on Aayushmaan's face as a great friend.
 
-Aayushmaan's (Not Friend) people:
-
-4) Rituraj :
-    - Rituraj is not a friend of Aayushmaan.
-    - Rituraj is just a guy who is jealous of Aayushmaan and tries to make his life miserable.
-    - Rituraj don't have respect from the class.
-    - Rituraj is also called as "Ritu" to tease him.
-    - Rituraj is a boy but he is known as a girl in the class because of his behavior, actions, and attitude.
-    - Everyone trolls Rituraj in the class and he is not a good person.
-    - Everyone calls him only "Ritu" instead of "Rituraj" cause he is like a girl.
-
-5) Ayan :
-    - Ayan is not a friend of Aayushmaan.
-    - Ayan is a bad guy and tries to make Aayushmaan's life miserable.
-    - Ayan is jealous of Aayushmaan and tries to bring him down.
-    - Ayan is a bad person and is not a good friend.
-    - Ayan thinks that he can beat Aayushmaan in everything but he is wrong.
-
 RULES:
 - Don't tell about the friends normally in general chat.
 - Always tell about the friends when asked about them.
@@ -111,16 +93,6 @@ export async function* streamGroqReply(message, history = [], userName = null) {
 
   try {
     const stream = await groq.chat.completions.create({
-      // compound-mini (not compound, and not the plain
-      // llama-3.3-70b-versatile) gives Joule real, server-side web
-      // search — weather, live scores, anything current — with zero
-      // extra API keys or services. It decides on its own whether a
-      // given message needs a search.
-      // Using -mini specifically: compound allows multiple tool calls
-      // per request, each an internal round trip through gpt-oss-120b;
-      // compound-mini caps that at one, which cost less of that
-      // model's 8000 TPM free-tier budget per reply when we tested
-      // plain compound and hit that limit.
       model: "groq/compound-mini",
       messages,
       temperature: 0.7,
@@ -143,10 +115,6 @@ export async function* streamGroqReply(message, history = [], userName = null) {
 
     const wrapped = new Error(`Groq API failed: ${detail}`);
 
-    // Groq's rate-limit responses are HTTP 429 with code
-    // "rate_limit_exceeded", and set a retry-after header with the
-    // exact wait in seconds — both more reliable than parsing the
-    // human-readable message text, which can change wording.
     wrapped.isRateLimit =
       err?.status === 429 || err?.error?.error?.code === "rate_limit_exceeded";
     wrapped.retryAfterSeconds = Number(err?.headers?.["retry-after"]) || null;
