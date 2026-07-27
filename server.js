@@ -4,7 +4,6 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import aiRoutes from "./Routes/ai.js";
-import transcribeRoute from "./Routes/transcribe.js";
 import authRoutes from "./Routes/auth.js";
 import imageRoutes from "./Routes/image.js";
 import wakeRoutes from "./Routes/wake.js";
@@ -54,7 +53,6 @@ const limiter = rateLimit({
 
 app.use(limiter);
 app.use("/api/ai", aiRoutes);
-app.use("/api/transcribe", transcribeRoute);
 app.use("/api/image", imageRoutes);
 app.get("/", (req, res) => {
   res.send("🔥 Joule AI Backend Running");

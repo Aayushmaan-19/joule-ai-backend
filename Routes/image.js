@@ -1,7 +1,9 @@
 import express from "express";
 import rateLimit from "express-rate-limit";
+import { getFirestore } from "firebase-admin/firestore";
 import verifyFirebase from "../middleware/verifyFirebase.js";
 import { generateImage } from "../Services/pollinations.js";
+import { uploadGalleryImage, deleteGalleryImage } from "../Services/storage.js";
 import {
   checkAndConsumeImageUsage,
   refundImageUsage,
@@ -62,6 +64,14 @@ router.post("/generate", imageLimiter, verifyFirebase, async (req, res) => {
       });
     const image = `data:${contentType};base64,${buffer.toString("base64")}`;
 
+    // Gallery persistence is a secondary feature riding on a
+    // successful generation — it must never delay or fail the reply
+    // the user is already waiting on, so it's deliberately not
+    // awaited here. Any failure is only logged.
+    saveToGallery(req.user.uid, prompt.trim(), buffer, contentType).catch(err =>
+      console.error("Gallery save failed:", err.message)
+    );
+
     return res.json({
       image,
       remaining: usage.remaining,
@@ -78,3 +88,23 @@ router.post("/generate", imageLimiter, verifyFirebase, async (req, res) => {
 });
 
 export default router;
+
+/**
+ * Uploads the image to Storage, then records it in the user's
+ * gallery collection. If the Firestore write fails after the file
+ * already uploaded, the orphaned file is removed rather than left
+ * behind with no doc pointing to it.
+ */
+async function saveToGallery(uid, prompt, buffer, contentType) {
+  const { imageId, url, path } = await uploadGalleryImage(uid, buffer, contentType);
+
+  try {
+    await getFirestore()
+      .collection("users").doc(uid)
+      .collection("images").doc(imageId)
+      .set({ prompt, url, path, contentType, createdAt: Date.now() });
+  } catch (err) {
+    await deleteGalleryImage(uid, imageId, contentType).catch(() => {});
+    throw err;
+  }
+}
