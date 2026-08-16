@@ -190,7 +190,9 @@ router.post("/signup/verify-otp", async (req, res) => {
       plan: "free",
       messagesUsed: 0,
       voiceUsed: 0,
-      emailVerified: true
+      emailVerified: true,
+      followerCount: 0,
+      followingCount: 0
     });
 
     await otpRef.delete();
