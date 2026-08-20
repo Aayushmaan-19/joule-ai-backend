@@ -8,6 +8,7 @@ import authRoutes from "./Routes/auth.js";
 import imageRoutes from "./Routes/image.js";
 import wakeRoutes from "./Routes/wake.js";
 import socialRoutes from "./Routes/social.js";
+import profileRoutes from "./Routes/profile.js";
 
 const app = express();
 
@@ -56,6 +57,7 @@ app.use(limiter);
 app.use("/api/ai", aiRoutes);
 app.use("/api/image", imageRoutes);
 app.use("/api/social", socialRoutes);
+app.use("/api/profile", profileRoutes);
 app.get("/", (req, res) => {
   res.send("🔥 Joule AI Backend Running");
 });

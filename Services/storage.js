@@ -47,3 +47,37 @@ export async function deleteGalleryImage(uid, imageId, contentType) {
   const bucket = getStorage().bucket();
   await bucket.file(`images/${uid}/${imageId}.${extension}`).delete({ ignoreNotFound: true });
 }
+
+/**
+ * Uploads a user's avatar to a single fixed path per user (unlike
+ * gallery images, there's only ever one current avatar, so this
+ * overwrites rather than accumulating). Clears out any file left at
+ * another extension first — otherwise switching from, say, a .png
+ * upload to a .jpg one would silently orphan the old file forever.
+ */
+export async function uploadAvatar(uid, buffer, contentType) {
+  const bucket = getStorage().bucket();
+  const extension = EXTENSION_BY_CONTENT_TYPE[contentType] || "jpg";
+
+  await Promise.all(
+    Object.values(EXTENSION_BY_CONTENT_TYPE).map(ext =>
+      bucket.file(`avatars/${uid}.${ext}`).delete({ ignoreNotFound: true })
+    )
+  );
+
+  const filePath = `avatars/${uid}.${extension}`;
+  const file = bucket.file(filePath);
+  const downloadToken = randomUUID();
+
+  await file.save(buffer, {
+    metadata: {
+      contentType,
+      metadata: { firebaseStorageDownloadTokens: downloadToken }
+    }
+  });
+
+  const encodedPath = encodeURIComponent(filePath);
+  const url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${downloadToken}`;
+
+  return { url, path: filePath };
+}
