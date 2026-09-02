@@ -13,7 +13,8 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
 const app = getApps().length
   ? getApp()
   : initializeApp({
-      credential: cert(serviceAccount)
+      credential: cert(serviceAccount),
+      storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET
     });
 
 export default app;

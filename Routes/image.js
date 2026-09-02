@@ -87,6 +87,36 @@ router.post("/generate", imageLimiter, verifyFirebase, async (req, res) => {
   }
 });
 
+router.delete("/gallery/:imageId", verifyFirebase, async (req, res) => {
+  try {
+    const { imageId } = req.params;
+    const uid = req.user.uid;
+
+    const docRef = getFirestore()
+      .collection("users").doc(uid)
+      .collection("images").doc(imageId);
+
+    const snap = await docRef.get();
+
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Image not found" });
+    }
+
+    const { contentType } = snap.data();
+
+    await deleteGalleryImage(uid, imageId, contentType);
+    await docRef.delete();
+
+    return res.json({ deleted: true });
+  } catch (err) {
+    console.error("Gallery delete error:", err.message);
+
+    return res.status(500).json({
+      error: "Couldn't delete that image. Please try again."
+    });
+  }
+});
+
 export default router;
 
 /**
