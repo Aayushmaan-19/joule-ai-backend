@@ -117,6 +117,20 @@ export async function declineFollowRequest(targetUid, requesterUid) {
   await requestRef.delete();
 }
 
+/** Withdraws a request I sent, before the other person has acted on it. Symmetric to declineFollowRequest, but from the requester's side. */
+export async function cancelFollowRequest(requesterUid, targetUid) {
+  const db = getFirestore();
+  const requestRef = db.collection("followRequests").doc(requestId(requesterUid, targetUid));
+
+  const snap = await requestRef.get();
+
+  if (!snap.exists || snap.data().requester !== requesterUid) {
+    throw fail(404, "No pending request to this user");
+  }
+
+  await requestRef.delete();
+}
+
 /**
  * Removes an accepted follow edge and decrements both counters
  * atomically. Either side of a connection can sever it — the
@@ -160,13 +174,27 @@ async function areConnected(uidA, uidB) {
   return a.exists || b.exists;
 }
 
+/** Throws unless uid is one of the two participants on this conversation. Shared gate for every per-message action below. */
+async function assertParticipant(uid, convoId) {
+  const db = getFirestore();
+  const convoSnap = await db.collection("conversations").doc(convoId).get();
+
+  if (!convoSnap.exists || !convoSnap.data().participants.includes(uid)) {
+    throw fail(403, "You're not part of this conversation");
+  }
+
+  return convoSnap;
+}
+
 /**
  * Sends a message, creating the conversation document on first
  * contact. `conversations/{id}` uses a deterministic id (sorted uid
  * pair) so there's exactly one thread per pair — no query needed to
- * find or dedupe it, on either the client or here.
+ * find or dedupe it, on either the client or here. `replyTo` and
+ * `forwardedFrom` are optional denormalized snippets attached to the
+ * message so rendering a thread never needs a second read.
  */
-export async function sendMessage(senderUid, recipientUid, text) {
+export async function sendMessage(senderUid, recipientUid, text, { replyTo = null, forwardedFrom = null } = {}) {
   if (senderUid === recipientUid) {
     throw fail(400, "You can't message yourself");
   }
@@ -205,7 +233,10 @@ export async function sendMessage(senderUid, recipientUid, text) {
     tx.set(messageRef, {
       senderUid,
       text: trimmed,
-      sentAt: now
+      sentAt: now,
+      reactions: {},
+      replyTo,
+      forwardedFrom
     });
 
     tx.set(
@@ -223,7 +254,7 @@ export async function sendMessage(senderUid, recipientUid, text) {
             avatar: recipientData.avatar || null
           }
         },
-        lastMessage: { text: trimmed, senderUid, sentAt: now },
+        lastMessage: { messageId: messageRef.id, text: trimmed, senderUid, sentAt: now, deleted: false },
         updatedAt: now
       },
       { merge: true }
@@ -231,4 +262,131 @@ export async function sendMessage(senderUid, recipientUid, text) {
   });
 
   return { conversationId: convoId, messageId: messageRef.id, sentAt: now.getTime() };
+}
+
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
+
+/** Only the sender, only within a short window, only if it hasn't already been deleted. */
+export async function editMessage(uid, convoId, messageId, newText) {
+  const trimmed = (newText || "").trim();
+  if (!trimmed) throw fail(400, "Message can't be empty");
+  if (trimmed.length > MAX_MESSAGE_LENGTH) {
+    throw fail(400, `Message too long (max ${MAX_MESSAGE_LENGTH} characters)`);
+  }
+
+  const db = getFirestore();
+  const convoRef = db.collection("conversations").doc(convoId);
+  const messageRef = convoRef.collection("messages").doc(messageId);
+
+  await db.runTransaction(async (tx) => {
+    const [convoSnap, msgSnap] = await Promise.all([tx.get(convoRef), tx.get(messageRef)]);
+
+    if (!convoSnap.exists || !convoSnap.data().participants.includes(uid)) {
+      throw fail(403, "You're not part of this conversation");
+    }
+    if (!msgSnap.exists || msgSnap.data().deleted) {
+      throw fail(404, "Message not found");
+    }
+    if (msgSnap.data().senderUid !== uid) {
+      throw fail(403, "You can only edit your own messages");
+    }
+    if (Date.now() - msgSnap.data().sentAt.toMillis() > EDIT_WINDOW_MS) {
+      throw fail(403, "This message is too old to edit");
+    }
+
+    const now = new Date();
+    tx.update(messageRef, { text: trimmed, editedAt: now });
+
+    if (convoSnap.data().lastMessage?.messageId === messageId) {
+      tx.update(convoRef, { "lastMessage.text": trimmed });
+    }
+  });
+}
+
+/**
+ * Soft delete — the doc stays (so the thread's ordering and any
+ * replies pointing at it stay intact) but the text is actually wiped
+ * server-side, not just hidden client-side, so it isn't sitting in
+ * Firestore for anyone to read back out.
+ */
+export async function deleteMessage(uid, convoId, messageId) {
+  const db = getFirestore();
+  const convoRef = db.collection("conversations").doc(convoId);
+  const messageRef = convoRef.collection("messages").doc(messageId);
+
+  await db.runTransaction(async (tx) => {
+    const [convoSnap, msgSnap] = await Promise.all([tx.get(convoRef), tx.get(messageRef)]);
+
+    if (!convoSnap.exists || !convoSnap.data().participants.includes(uid)) {
+      throw fail(403, "You're not part of this conversation");
+    }
+    if (!msgSnap.exists) throw fail(404, "Message not found");
+    if (msgSnap.data().senderUid !== uid) {
+      throw fail(403, "You can only delete your own messages");
+    }
+
+    tx.update(messageRef, { text: "", deleted: true, reactions: {} });
+
+    if (convoSnap.data().lastMessage?.messageId === messageId) {
+      tx.update(convoRef, { "lastMessage.text": "", "lastMessage.deleted": true });
+    }
+  });
+}
+
+/** Tap the same emoji again to remove it — one reaction per person per message, like every app that does this. */
+export async function toggleReaction(uid, convoId, messageId, emoji) {
+  const db = getFirestore();
+  await assertParticipant(uid, convoId);
+
+  const messageRef = db.collection("conversations").doc(convoId).collection("messages").doc(messageId);
+  const msgSnap = await messageRef.get();
+
+  if (!msgSnap.exists || msgSnap.data().deleted) {
+    throw fail(404, "Message not found");
+  }
+
+  const current = msgSnap.data().reactions || {};
+  const isRemoving = current[uid] === emoji;
+
+  await messageRef.update({
+    [`reactions.${uid}`]: isRemoving ? FieldValue.delete() : emoji
+  });
+}
+
+/** Re-sends the source message's text into a new conversation with `toUid`, tagged with who it originally came from. */
+export async function forwardMessage(uid, convoId, messageId, toUid) {
+  const db = getFirestore();
+  await assertParticipant(uid, convoId);
+
+  const msgSnap = await db.collection("conversations").doc(convoId).collection("messages").doc(messageId).get();
+
+  if (!msgSnap.exists || msgSnap.data().deleted) {
+    throw fail(404, "Message not found");
+  }
+
+  const original = msgSnap.data();
+  const originalSenderSnap = await db.collection("users").doc(original.senderUid).get();
+  const originalSenderName = originalSenderSnap.data()?.displayName || "Someone";
+
+  return sendMessage(uid, toUid, original.text, { forwardedFrom: originalSenderName });
+}
+
+/** Advances my own read cursor for this conversation to now — the other participant's unread count is derived by comparing message timestamps against this on read. */
+export async function markConversationRead(uid, convoId) {
+  const db = getFirestore();
+  await assertParticipant(uid, convoId);
+
+  await db.collection("conversations").doc(convoId).update({
+    [`lastRead.${uid}`]: new Date()
+  });
+}
+
+/** Stamps "I'm typing" with a timestamp rather than a boolean, so a client that never sends an explicit "stopped" event still self-expires — the reader just treats anything older than a few seconds as not-typing. */
+export async function setTyping(uid, convoId) {
+  const db = getFirestore();
+  await assertParticipant(uid, convoId);
+
+  await db.collection("conversations").doc(convoId).update({
+    [`typing.${uid}`]: new Date()
+  });
 }

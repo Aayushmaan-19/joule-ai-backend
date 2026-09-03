@@ -5,8 +5,15 @@ import {
   sendFollowRequest,
   acceptFollowRequest,
   declineFollowRequest,
+  cancelFollowRequest,
   unfollow,
-  sendMessage
+  sendMessage,
+  editMessage,
+  deleteMessage,
+  toggleReaction,
+  forwardMessage,
+  markConversationRead,
+  setTyping
 } from "../Services/socialService.js";
 
 const router = express.Router();
@@ -97,6 +104,22 @@ router.post("/unfollow", async (req, res) => {
   }
 });
 
+router.post("/follow/cancel", async (req, res) => {
+  try {
+    const targetUid = requireUid(req, res, "targetUid");
+    if (!targetUid) return;
+
+    await cancelFollowRequest(req.user.uid, targetUid);
+
+    return res.json({ cancelled: true });
+  } catch (err) {
+    console.error("Follow cancel route error:", err.message);
+    return res.status(err.status || 500).json({
+      error: err.status ? err.message : "Something went wrong. Please try again."
+    });
+  }
+});
+
 const messageLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
@@ -110,13 +133,13 @@ router.post("/message/send", messageLimiter, async (req, res) => {
     const toUid = requireUid(req, res, "toUid");
     if (!toUid) return;
 
-    const { text } = req.body;
+    const { text, replyTo } = req.body;
 
     if (typeof text !== "string") {
       return res.status(400).json({ error: "text is required" });
     }
 
-    const result = await sendMessage(req.user.uid, toUid, text);
+    const result = await sendMessage(req.user.uid, toUid, text, { replyTo: replyTo || null });
 
     return res.json(result);
   } catch (err) {
@@ -124,6 +147,127 @@ router.post("/message/send", messageLimiter, async (req, res) => {
     return res.status(err.status || 500).json({
       error: err.status ? err.message : "Something went wrong. Please try again."
     });
+  }
+});
+
+router.post("/message/edit", async (req, res) => {
+  try {
+    const { conversationId, messageId, text } = req.body || {};
+
+    if (!conversationId || !messageId || typeof text !== "string") {
+      return res.status(400).json({ error: "conversationId, messageId and text are required" });
+    }
+
+    await editMessage(req.user.uid, conversationId, messageId, text);
+
+    return res.json({ edited: true });
+  } catch (err) {
+    console.error("Message edit route error:", err.message);
+    return res.status(err.status || 500).json({
+      error: err.status ? err.message : "Something went wrong. Please try again."
+    });
+  }
+});
+
+router.post("/message/delete", async (req, res) => {
+  try {
+    const { conversationId, messageId } = req.body || {};
+
+    if (!conversationId || !messageId) {
+      return res.status(400).json({ error: "conversationId and messageId are required" });
+    }
+
+    await deleteMessage(req.user.uid, conversationId, messageId);
+
+    return res.json({ deleted: true });
+  } catch (err) {
+    console.error("Message delete route error:", err.message);
+    return res.status(err.status || 500).json({
+      error: err.status ? err.message : "Something went wrong. Please try again."
+    });
+  }
+});
+
+router.post("/message/react", async (req, res) => {
+  try {
+    const { conversationId, messageId, emoji } = req.body || {};
+
+    if (!conversationId || !messageId || typeof emoji !== "string" || !emoji) {
+      return res.status(400).json({ error: "conversationId, messageId and emoji are required" });
+    }
+
+    await toggleReaction(req.user.uid, conversationId, messageId, emoji);
+
+    return res.json({ reacted: true });
+  } catch (err) {
+    console.error("Message react route error:", err.message);
+    return res.status(err.status || 500).json({
+      error: err.status ? err.message : "Something went wrong. Please try again."
+    });
+  }
+});
+
+router.post("/message/forward", messageLimiter, async (req, res) => {
+  try {
+    const { conversationId, messageId } = req.body || {};
+    const toUid = requireUid(req, res, "toUid");
+    if (!toUid) return;
+
+    if (!conversationId || !messageId) {
+      return res.status(400).json({ error: "conversationId and messageId are required" });
+    }
+
+    const result = await forwardMessage(req.user.uid, conversationId, messageId, toUid);
+
+    return res.json(result);
+  } catch (err) {
+    console.error("Message forward route error:", err.message);
+    return res.status(err.status || 500).json({
+      error: err.status ? err.message : "Something went wrong. Please try again."
+    });
+  }
+});
+
+router.post("/message/read", async (req, res) => {
+  try {
+    const { conversationId } = req.body || {};
+    if (!conversationId) {
+      return res.status(400).json({ error: "conversationId is required" });
+    }
+
+    await markConversationRead(req.user.uid, conversationId);
+
+    return res.json({ read: true });
+  } catch (err) {
+    console.error("Message read route error:", err.message);
+    return res.status(err.status || 500).json({
+      error: err.status ? err.message : "Something went wrong. Please try again."
+    });
+  }
+});
+
+const typingLimiter = rateLimit({
+  windowMs: 10 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Slow down." }
+});
+
+router.post("/typing", typingLimiter, async (req, res) => {
+  try {
+    const { conversationId } = req.body || {};
+    if (!conversationId) {
+      return res.status(400).json({ error: "conversationId is required" });
+    }
+
+    await setTyping(req.user.uid, conversationId);
+
+    return res.json({ ok: true });
+  } catch (err) {
+    // Typing is best-effort UI polish, not a critical action — fail quietly server-side, no need to surface an error to the sender over a missed keystroke ping.
+    console.error("Typing route error:", err.message);
+    return res.status(err.status || 500).json({ ok: false });
   }
 });
 
