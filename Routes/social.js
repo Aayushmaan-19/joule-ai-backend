@@ -1,5 +1,6 @@
 import express from "express";
 import rateLimit from "express-rate-limit";
+import { getFirestore } from "firebase-admin/firestore";
 import verifyFirebase from "../middleware/verifyFirebase.js";
 import {
   sendFollowRequest,
@@ -27,6 +28,21 @@ router.use((req, res, next) => {
     return res.status(403).json({ error: "Verify your email to use messaging." });
   }
   next();
+});
+
+router.use(async (req, res, next) => {
+  try {
+    const snap = await getFirestore().collection("users").doc(req.user.uid).get();
+
+    if (!snap.data()?.username) {
+      return res.status(403).json({ error: "Set a username to use this." });
+    }
+
+    next();
+  } catch (err) {
+    console.error("Username gate error:", err.message);
+    return res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
 });
 
 function requireUid(req, res, field = "targetUid") {
