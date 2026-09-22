@@ -14,7 +14,7 @@ const groq = new Groq({
  */
 export async function pingGroq() {
   await groq.chat.completions.create({
-    model: "llama-3.3-70b-versatile",
+    model: "openai/gpt-oss-20b",
     messages: [{ role: "user", content: "ping" }],
     max_completion_tokens: 5,
     stream: false
@@ -93,7 +93,7 @@ export async function* streamGroqReply(message, history = [], userName = null) {
 
   try {
     const stream = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      model: "openai/gpt-oss-20b",
       messages,
       temperature: 0.7,
       max_completion_tokens: 800,

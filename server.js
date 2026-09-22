@@ -37,7 +37,7 @@ app.use(
 
       callback(new Error(`CORS: origin not allowed — ${origin}`));
     },
-    methods: ["GET", "POST", "OPTIONS"],
+    methods: ["GET", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     exposedHeaders: ["X-Remaining", "X-Limit"]
   })
@@ -60,6 +60,13 @@ app.use("/api/social", socialRoutes);
 app.use("/api/profile", profileRoutes);
 app.get("/", (req, res) => {
   res.send("🔥 Joule AI Backend Running");
+});
+
+// Lightweight health endpoint for Render and uptime checks.
+// Do not call Groq/Firebase here; external dependencies can be unhealthy
+// while this Node process is still perfectly capable of receiving traffic.
+app.get("/healthz", (req, res) => {
+  res.status(200).json({ status: "ok" });
 });
 
 // 5. START SERVER LAST
