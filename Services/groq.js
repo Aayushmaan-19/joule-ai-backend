@@ -14,7 +14,7 @@ const groq = new Groq({
  */
 export async function pingGroq() {
   await groq.chat.completions.create({
-    model: "groq/compound-mini",
+    model: "llama-3.3-70b-versatile",
     messages: [{ role: "user", content: "ping" }],
     max_completion_tokens: 5,
     stream: false
@@ -23,7 +23,7 @@ export async function pingGroq() {
 
 function buildSystemPrompt(userName) {
   const nameLine = userName
-    ? `\nThe user's name is ${userName}. Address them by name naturally sometimes, but don't overdo it.\n`
+    ? `\nThe user's name is ${userName}. Address them by name naturally.\n`
     : "";
 
   return `
@@ -93,7 +93,7 @@ export async function* streamGroqReply(message, history = [], userName = null) {
 
   try {
     const stream = await groq.chat.completions.create({
-      model: "groq/compound-mini",
+      model: "llama-3.3-70b-versatile",
       messages,
       temperature: 0.7,
       max_completion_tokens: 800,
