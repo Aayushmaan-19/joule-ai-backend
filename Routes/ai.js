@@ -51,10 +51,10 @@ router.post("/chat", optionalAuth, async (req, res) => {
         });
       }
     } else {
-      const ip =
-        req.headers["x-forwarded-for"]?.split(",")[0].trim() ||
-        req.socket.remoteAddress ||
-        "unknown";
+      // `trust proxy` is set in server.js, so req.ip is the address Render's
+      // proxy saw — not the first X-Forwarded-For entry, which the client
+      // controls and could change on every request to get a fresh quota.
+      const ip = req.ip;
 
       usage = await checkAndConsumeGuestUsage(ip);
       refund = () => refundGuestUsage(ip);

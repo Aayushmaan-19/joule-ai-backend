@@ -45,6 +45,23 @@ app.use(
 
 app.use(express.json({ limit: "10kb" }));
 
+// The signup routes are public (no account, no token) and /signup/send-otp
+// makes the server email whatever address is submitted. The per-email resend
+// cooldown in auth.js does nothing against someone rotating addresses, so
+// cap them per IP. This must be mounted BEFORE the auth router: Express only
+// applies middleware to requests that pass through it.
+const signupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many signup attempts. Please try again in a few minutes."
+  }
+});
+
+app.use("/api/auth/signup", signupLimiter);
 app.use("/api/auth", authRoutes);
 app.use("/api/wake", wakeRoutes);
 
