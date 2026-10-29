@@ -1,30 +1,38 @@
 import fetch from "node-fetch";
 
-const POLLINATIONS_ENDPOINT = "https://image.pollinations.ai/prompt";
+const POLLINATIONS_ENDPOINT = "https://gen.pollinations.ai/image";
 
 /**
- * Generates an image from a text prompt using Pollinations.ai — free,
- * no API key, no signup. Runs the Flux model, which (unlike
- * FLUX.1-dev) is Apache 2.0 licensed with no non-commercial
- * restriction, so it's a safe fit for an app with real end users.
+ * Generates an image from a text prompt using Pollinations' unified API
+ * (gen.pollinations.ai) with a server-side secret key (sk_...).
  *
- * No nologo/enhance params here on purpose — Pollinations removed
- * both from the API on 2026-06-10 ("weren't doing anything anyway"),
- * so sending them would just be dead weight.
+ * The old keyless endpoint (image.pollinations.ai) is capped at one
+ * image per 45 seconds per IP — and every request from this backend
+ * shares Render's outbound IP, so it answered 402 FREE_LIMIT as soon as
+ * two users (or one user twice) generated within that window. A secret
+ * key isn't subject to that per-IP limit; usage is billed against the
+ * account's Pollen balance instead.
  *
- * Joule's own daily image quota (usageTracker.js) is what actually
- * rate-limits this per user; Pollinations' anonymous tier has its own
- * separate, coarser throttle (roughly one request per ~15s globally
- * for this server's traffic), worth knowing if image generation ever
- * gets a lot busier than a personal project's usual traffic.
+ * Joule's own daily image quota (usageTracker.js) is what bounds how
+ * much Pollen users can spend.
+ *
+ * The key must stay server-side — never send it to the browser.
  *
  * @param {string} prompt - The image description
  * @returns {Promise<{ buffer: Buffer, contentType: string }>}
  */
 export async function generateImage(prompt) {
-  const url = `${POLLINATIONS_ENDPOINT}/${encodeURIComponent(prompt)}`;
+  const apiKey = process.env.POLLINATIONS_API_KEY;
 
-  const response = await fetch(url);
+  if (!apiKey) {
+    throw new Error("POLLINATIONS_API_KEY is not set");
+  }
+
+  const url = `${POLLINATIONS_ENDPOINT}/${encodeURIComponent(prompt)}?model=flux`;
+
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${apiKey}` }
+  });
 
   if (!response.ok) {
     const detail = await response.text();
