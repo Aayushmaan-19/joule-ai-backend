@@ -87,6 +87,29 @@ router.post("/generate", imageLimiter, verifyFirebase, async (req, res) => {
   }
 });
 
+router.get("/gallery", verifyFirebase, async (req, res) => {
+  try {
+    const snap = await getFirestore()
+      .collection("users").doc(req.user.uid)
+      .collection("images")
+      .orderBy("createdAt", "desc")
+      .get();
+
+    const images = snap.docs.map(d => {
+      const { prompt, url, createdAt } = d.data();
+      return { id: d.id, prompt, url, createdAt };
+    });
+
+    return res.json({ images });
+  } catch (err) {
+    console.error("Gallery list error:", err.message);
+
+    return res.status(500).json({
+      error: "Couldn't load your images. Please try again."
+    });
+  }
+});
+
 router.delete("/gallery/:imageId", verifyFirebase, async (req, res) => {
   try {
     const { imageId } = req.params;
