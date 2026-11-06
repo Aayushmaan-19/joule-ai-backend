@@ -1,177 +1,414 @@
-import { getFirestore } from "firebase-admin/firestore";
-import { getAuth } from "firebase-admin/auth";
-import { userLabel, userName } from "./userIdentity.js";
-import { isAdminEmail } from "../middleware/requireAdmin.js";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { userName } from "./userIdentity.js";
 
-const MAX_USERS = 300;
+const MAX_MESSAGE_LENGTH = 2000;
 
+/**
+ * Attaches an HTTP status to a plain Error so the route layer can
+ * respond with the right code without re-deriving it. Kept as a
+ * lightweight convention rather than a class hierarchy — one line
+ * at each throw site, one line at each catch site.
+ */
 function fail(status, message) {
   const err = new Error(message);
   err.status = status;
   return err;
 }
 
-const iso = value => (value?.toDate ? value.toDate().toISOString() : null);
-
-/** Every admin action that changes something or opens someone's account is written here. */
-export async function logAdminAction(admin, action, target = {}, details = {}) {
-  await getFirestore().collection("adminAuditLog").add({
-    at: new Date(),
-    adminUid: admin.uid,
-    adminEmail: admin.email || null,
-    action,
-    targetUid: target.uid || null,
-    targetLabel: target.label || null,
-    details
-  });
+function followId(followerUid, followeeUid) {
+  return `${followerUid}_${followeeUid}`;
 }
 
-function summarize(doc) {
-  const d = doc.data();
-  return {
-    uid: doc.id,
-    readableId: d.readableId || null,
-    label: d.label || userLabel(d, doc.id),
-    name: userName(d, doc.id),
-    email: d.email || null,
-    username: d.username || null,
-    displayName: d.displayName || null,
-    avatar: d.avatar || null,
-    plan: d.plan || "free",
-    emailVerified: d.emailVerified === true,
-    followerCount: d.followerCount || 0,
-    followingCount: d.followingCount || 0,
-    createdAt: iso(d.createdAt),
-    lastLoginAt: iso(d.lastLoginAt)
-  };
+function requestId(requesterUid, targetUid) {
+  return `${requesterUid}_${targetUid}`;
 }
 
-export async function listUsers(query = "") {
-  const snap = await getFirestore().collection("users").limit(MAX_USERS).get();
-  const q = query.trim().toLowerCase();
-
-  return snap.docs
-    .map(summarize)
-    .filter(u => !q || [u.label, u.email, u.username, u.displayName, u.readableId, u.uid].some(v => String(v || "").toLowerCase().includes(q)))
-    .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
-}
-
-async function userSummaries(uids) {
-  const db = getFirestore();
-  const unique = [...new Set(uids)];
-  if (unique.length === 0) return new Map();
-
-  const docs = await db.getAll(...unique.map(uid => db.collection("users").doc(uid)));
-  return new Map(docs.filter(d => d.exists).map(d => [d.id, summarize(d)]));
-}
-
-/** Everything about one account that matters for support / security checks. Message text is NOT included. */
-export async function getUserDetail(uid) {
-  const db = getFirestore();
-  const userSnap = await db.collection("users").doc(uid).get();
-  if (!userSnap.exists) throw fail(404, "User not found");
-
-  const [followers, following, incoming, outgoing, convos] = await Promise.all([
-    db.collection("follows").where("followee", "==", uid).get(),
-    db.collection("follows").where("follower", "==", uid).get(),
-    db.collection("followRequests").where("target", "==", uid).get(),
-    db.collection("followRequests").where("requester", "==", uid).get(),
-    db.collection("conversations").where("participants", "array-contains", uid).get()
-  ]);
-
-  const related = [
-    ...followers.docs.map(d => d.data().follower),
-    ...following.docs.map(d => d.data().followee),
-    ...incoming.docs.map(d => d.data().requester),
-    ...outgoing.docs.map(d => d.data().target),
-    ...convos.docs.flatMap(d => d.data().participants || [])
-  ];
-  const people = await userSummaries(related);
-  const who = other => people.get(other) || { uid: other, label: other.slice(0, 8), name: other.slice(0, 8) };
-
-  return {
-    user: summarize(userSnap),
-    followers: followers.docs.map(d => who(d.data().follower)),
-    following: following.docs.map(d => who(d.data().followee)),
-    incomingRequests: incoming.docs.map(d => ({
-      ...who(d.data().requester),
-      requestedAt: iso(d.data().createdAt)
-    })),
-    outgoingRequests: outgoing.docs.map(d => ({
-      ...who(d.data().target),
-      requestedAt: iso(d.data().createdAt)
-    })),
-    conversations: convos.docs
-      .map(d => {
-        const data = d.data();
-        const otherUid = (data.participants || []).find(p => p !== uid);
-        return {
-          id: d.id,
-          with: who(otherUid),
-          lastMessageAt: iso(data.updatedAt),
-          lastMessagePreview: data.lastMessage?.deleted ? "(deleted)" : (data.lastMessage?.text || "").slice(0, 80)
-        };
-      })
-      .sort((a, b) => String(b.lastMessageAt || "").localeCompare(String(a.lastMessageAt || "")))
-  };
-}
-
-/** A custom token that signs the admin in AS the target user. Marked so the session can be recognised and exited. */
-export async function startImpersonation(admin, targetUid) {
-  const db = getFirestore();
-  const targetSnap = await db.collection("users").doc(targetUid).get();
-  if (!targetSnap.exists) throw fail(404, "User not found");
-  if (targetUid === admin.uid) throw fail(400, "That's your own account");
-
-  const target = targetSnap.data();
-  if (isAdminEmail(target.email)) throw fail(403, "Admin accounts can't be opened this way");
-
-  const customToken = await getAuth().createCustomToken(targetUid, { impersonatedBy: admin.uid });
-  await logAdminAction(admin, "impersonation.start", { uid: targetUid, label: userLabel(target, targetUid) });
-
-  return { customToken, label: userLabel(target, targetUid) };
+function conversationId(uidA, uidB) {
+  return [uidA, uidB].sort().join("_");
 }
 
 /**
- * Called from the impersonated session itself. The `impersonatedBy` claim
- * was signed by this server when the session started, so it can't be forged
- * by a client; the admin's email is still re-checked against ADMIN_EMAILS.
+ * Sends a follow request from `requesterUid` to `targetUid`. Every
+ * follow in this app requires the target's approval — there is no
+ * "public account, instant follow" path — so this only ever creates
+ * a pending request, never a `follows` edge directly.
  */
-export async function endImpersonation(decoded) {
-  const adminUid = decoded.impersonatedBy;
-  if (!adminUid) throw fail(403, "This isn't an admin session");
-
-  const adminRecord = await getAuth().getUser(adminUid);
-  if (!adminRecord.emailVerified || !isAdminEmail(adminRecord.email)) {
-    throw fail(403, "Admin access has been removed");
+export async function sendFollowRequest(requesterUid, targetUid) {
+  if (requesterUid === targetUid) {
+    throw fail(400, "You can't follow yourself");
   }
 
-  const customToken = await getAuth().createCustomToken(adminUid);
-  await logAdminAction(
-    { uid: adminUid, email: adminRecord.email },
-    "impersonation.end",
-    { uid: decoded.uid, label: decoded.email || decoded.uid }
-  );
+  const db = getFirestore();
+  const targetRef = db.collection("users").doc(targetUid);
+  const followRef = db.collection("follows").doc(followId(requesterUid, targetUid));
+  const requestRef = db.collection("followRequests").doc(requestId(requesterUid, targetUid));
 
-  return { customToken };
+  const [targetSnap, followSnap, requestSnap] = await Promise.all([
+    targetRef.get(),
+    followRef.get(),
+    requestRef.get()
+  ]);
+
+  if (!targetSnap.exists) {
+    throw fail(404, "User not found");
+  }
+  if (followSnap.exists) {
+    throw fail(409, "Already following this user");
+  }
+  if (requestSnap.exists) {
+    throw fail(409, "Follow request already sent");
+  }
+
+  const requesterSnap = await db.collection("users").doc(requesterUid).get();
+  const requesterData = requesterSnap.data() || {};
+
+  // requesterLabel / targetLabel / label exist only so a document's id
+  // (two uids) is readable in the Firebase console; nothing reads them.
+  const requesterLabel = userName(requesterData, requesterUid);
+  const targetLabel = userName(targetSnap.data() || {}, targetUid);
+
+  await requestRef.set({
+    requester: requesterUid,
+    target: targetUid,
+    requesterName: requesterData.displayName || "Someone",
+    requesterAvatar: requesterData.avatar || null,
+    requesterLabel,
+    targetLabel,
+    label: `${requesterLabel} → ${targetLabel}`,
+    createdAt: new Date()
+  });
 }
 
-export async function recentAudit(limit = 60) {
-  const snap = await getFirestore()
-    .collection("adminAuditLog")
-    .orderBy("at", "desc")
-    .limit(limit)
-    .get();
+/**
+ * Accepts a pending request. This is the one place a `follows` edge
+ * gets created — atomically, alongside deleting the request and
+ * incrementing both people's counters, so the three can never drift
+ * out of sync with each other.
+ */
+export async function acceptFollowRequest(targetUid, requesterUid) {
+  const db = getFirestore();
+  const requestRef = db.collection("followRequests").doc(requestId(requesterUid, targetUid));
+  const followRef = db.collection("follows").doc(followId(requesterUid, targetUid));
+  const requesterRef = db.collection("users").doc(requesterUid);
+  const targetRef = db.collection("users").doc(targetUid);
 
-  return snap.docs.map(d => {
-    const x = d.data();
-    return {
-      id: d.id,
-      at: iso(x.at) || (x.at instanceof Date ? x.at.toISOString() : null),
-      adminEmail: x.adminEmail,
-      action: x.action,
-      targetLabel: x.targetLabel,
-      details: x.details || {}
-    };
+  await db.runTransaction(async (tx) => {
+    const requestSnap = await tx.get(requestRef);
+
+    if (!requestSnap.exists || requestSnap.data().target !== targetUid) {
+      throw fail(404, "No pending request from this user");
+    }
+
+    const request = requestSnap.data();
+
+    tx.delete(requestRef);
+
+    tx.set(followRef, {
+      follower: requesterUid,
+      followee: targetUid,
+      followerLabel: request.requesterLabel || null,
+      followeeLabel: request.targetLabel || null,
+      label: request.label || null,
+      createdAt: new Date()
+    });
+
+    tx.update(requesterRef, { followingCount: FieldValue.increment(1) });
+    tx.update(targetRef, { followerCount: FieldValue.increment(1) });
+  });
+}
+
+/** Declines (deletes) a pending request. No edge, no counters — nothing to unwind. */
+export async function declineFollowRequest(targetUid, requesterUid) {
+  const db = getFirestore();
+  const requestRef = db.collection("followRequests").doc(requestId(requesterUid, targetUid));
+
+  const snap = await requestRef.get();
+
+  if (!snap.exists || snap.data().target !== targetUid) {
+    throw fail(404, "No pending request from this user");
+  }
+
+  await requestRef.delete();
+}
+
+/** Withdraws a request I sent, before the other person has acted on it. Symmetric to declineFollowRequest, but from the requester's side. */
+export async function cancelFollowRequest(requesterUid, targetUid) {
+  const db = getFirestore();
+  const requestRef = db.collection("followRequests").doc(requestId(requesterUid, targetUid));
+
+  const snap = await requestRef.get();
+
+  if (!snap.exists || snap.data().requester !== requesterUid) {
+    throw fail(404, "No pending request to this user");
+  }
+
+  await requestRef.delete();
+}
+
+/**
+ * Removes an accepted follow edge and decrements both counters
+ * atomically. Either side of a connection can sever it — the
+ * follower unfollowing, or the followee removing them — so this
+ * takes the edge's two uids directly rather than assuming who
+ * initiated the follow originally.
+ */
+export async function unfollow(followerUid, followeeUid) {
+  const db = getFirestore();
+  const followRef = db.collection("follows").doc(followId(followerUid, followeeUid));
+  const followerRef = db.collection("users").doc(followerUid);
+  const followeeRef = db.collection("users").doc(followeeUid);
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(followRef);
+
+    if (!snap.exists) {
+      throw fail(404, "Not following this user");
+    }
+
+    tx.delete(followRef);
+    tx.update(followerRef, { followingCount: FieldValue.increment(-1) });
+    tx.update(followeeRef, { followerCount: FieldValue.increment(-1) });
+  });
+}
+
+/**
+ * True once a follow edge exists in either direction between the two
+ * uids. Accepting a request is the trust boundary in this app — once
+ * B accepts A's request, messaging unlocks both ways, regardless of
+ * whether B ever follows A back. A separate "follow back to unlock
+ * replies" step would just be friction on top of a decision B already
+ * made when they hit accept.
+ */
+async function areConnected(uidA, uidB) {
+  const db = getFirestore();
+  const [a, b] = await Promise.all([
+    db.collection("follows").doc(followId(uidA, uidB)).get(),
+    db.collection("follows").doc(followId(uidB, uidA)).get()
+  ]);
+  return a.exists || b.exists;
+}
+
+/** Throws unless uid is one of the two participants on this conversation. Shared gate for every per-message action below. */
+async function assertParticipant(uid, convoId) {
+  const db = getFirestore();
+  const convoSnap = await db.collection("conversations").doc(convoId).get();
+
+  if (!convoSnap.exists || !convoSnap.data().participants.includes(uid)) {
+    throw fail(403, "You're not part of this conversation");
+  }
+
+  return convoSnap;
+}
+
+/**
+ * Sends a message, creating the conversation document on first
+ * contact. `conversations/{id}` uses a deterministic id (sorted uid
+ * pair) so there's exactly one thread per pair — no query needed to
+ * find or dedupe it, on either the client or here. `replyTo` and
+ * `forwardedFrom` are optional denormalized snippets attached to the
+ * message so rendering a thread never needs a second read.
+ */
+export async function sendMessage(senderUid, recipientUid, text, { replyTo = null, forwardedFrom = null } = {}) {
+  if (senderUid === recipientUid) {
+    throw fail(400, "You can't message yourself");
+  }
+
+  const trimmed = (text || "").trim();
+
+  if (!trimmed) {
+    throw fail(400, "Message can't be empty");
+  }
+  if (trimmed.length > MAX_MESSAGE_LENGTH) {
+    throw fail(400, `Message too long (max ${MAX_MESSAGE_LENGTH} characters)`);
+  }
+
+  const connected = await areConnected(senderUid, recipientUid);
+  if (!connected) {
+    throw fail(403, "You can only message people who've accepted your follow");
+  }
+
+  const db = getFirestore();
+  const convoId = conversationId(senderUid, recipientUid);
+  const convoRef = db.collection("conversations").doc(convoId);
+  const messageRef = convoRef.collection("messages").doc();
+
+  const [senderSnap, recipientSnap] = await Promise.all([
+    db.collection("users").doc(senderUid).get(),
+    db.collection("users").doc(recipientUid).get()
+  ]);
+
+  const senderData = senderSnap.data() || {};
+  const recipientData = recipientSnap.data() || {};
+  const now = new Date();
+
+  await db.runTransaction(async (tx) => {
+    const convoSnap = await tx.get(convoRef);
+
+    tx.set(messageRef, {
+      senderUid,
+      text: trimmed,
+      sentAt: now,
+      reactions: {},
+      replyTo,
+      forwardedFrom
+    });
+
+    const senderLabel = userName(senderData, senderUid);
+    const recipientLabel = userName(recipientData, recipientUid);
+    const labelOf = { [senderUid]: senderLabel, [recipientUid]: recipientLabel };
+    // Same uid order as the conversation id, so the label doesn't flip with whoever sent last.
+    const [firstUid, secondUid] = [senderUid, recipientUid].sort();
+
+    tx.set(
+      convoRef,
+      {
+        ...(convoSnap.exists ? {} : { createdAt: now }),
+        label: `${labelOf[firstUid]} ↔ ${labelOf[secondUid]}`,
+        participantLabels: { [senderUid]: senderLabel, [recipientUid]: recipientLabel },
+        participants: [senderUid, recipientUid],
+        participantInfo: {
+          [senderUid]: {
+            displayName: senderData.displayName || "Someone",
+            avatar: senderData.avatar || null
+          },
+          [recipientUid]: {
+            displayName: recipientData.displayName || "Someone",
+            avatar: recipientData.avatar || null
+          }
+        },
+        lastMessage: { messageId: messageRef.id, text: trimmed, senderUid, sentAt: now, deleted: false },
+        updatedAt: now
+      },
+      { merge: true }
+    );
+  });
+
+  return { conversationId: convoId, messageId: messageRef.id, sentAt: now.getTime() };
+}
+
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
+
+/** Only the sender, only within a short window, only if it hasn't already been deleted. */
+export async function editMessage(uid, convoId, messageId, newText) {
+  const trimmed = (newText || "").trim();
+  if (!trimmed) throw fail(400, "Message can't be empty");
+  if (trimmed.length > MAX_MESSAGE_LENGTH) {
+    throw fail(400, `Message too long (max ${MAX_MESSAGE_LENGTH} characters)`);
+  }
+
+  const db = getFirestore();
+  const convoRef = db.collection("conversations").doc(convoId);
+  const messageRef = convoRef.collection("messages").doc(messageId);
+
+  await db.runTransaction(async (tx) => {
+    const [convoSnap, msgSnap] = await Promise.all([tx.get(convoRef), tx.get(messageRef)]);
+
+    if (!convoSnap.exists || !convoSnap.data().participants.includes(uid)) {
+      throw fail(403, "You're not part of this conversation");
+    }
+    if (!msgSnap.exists || msgSnap.data().deleted) {
+      throw fail(404, "Message not found");
+    }
+    if (msgSnap.data().senderUid !== uid) {
+      throw fail(403, "You can only edit your own messages");
+    }
+    if (Date.now() - msgSnap.data().sentAt.toMillis() > EDIT_WINDOW_MS) {
+      throw fail(403, "This message is too old to edit");
+    }
+
+    const now = new Date();
+    tx.update(messageRef, { text: trimmed, editedAt: now });
+
+    if (convoSnap.data().lastMessage?.messageId === messageId) {
+      tx.update(convoRef, { "lastMessage.text": trimmed });
+    }
+  });
+}
+
+/**
+ * Soft delete — the doc stays (so the thread's ordering and any
+ * replies pointing at it stay intact) but the text is actually wiped
+ * server-side, not just hidden client-side, so it isn't sitting in
+ * Firestore for anyone to read back out.
+ */
+export async function deleteMessage(uid, convoId, messageId) {
+  const db = getFirestore();
+  const convoRef = db.collection("conversations").doc(convoId);
+  const messageRef = convoRef.collection("messages").doc(messageId);
+
+  await db.runTransaction(async (tx) => {
+    const [convoSnap, msgSnap] = await Promise.all([tx.get(convoRef), tx.get(messageRef)]);
+
+    if (!convoSnap.exists || !convoSnap.data().participants.includes(uid)) {
+      throw fail(403, "You're not part of this conversation");
+    }
+    if (!msgSnap.exists) throw fail(404, "Message not found");
+    if (msgSnap.data().senderUid !== uid) {
+      throw fail(403, "You can only delete your own messages");
+    }
+
+    tx.update(messageRef, { text: "", deleted: true, reactions: {} });
+
+    if (convoSnap.data().lastMessage?.messageId === messageId) {
+      tx.update(convoRef, { "lastMessage.text": "", "lastMessage.deleted": true });
+    }
+  });
+}
+
+/** Tap the same emoji again to remove it — one reaction per person per message, like every app that does this. */
+export async function toggleReaction(uid, convoId, messageId, emoji) {
+  const db = getFirestore();
+  await assertParticipant(uid, convoId);
+
+  const messageRef = db.collection("conversations").doc(convoId).collection("messages").doc(messageId);
+  const msgSnap = await messageRef.get();
+
+  if (!msgSnap.exists || msgSnap.data().deleted) {
+    throw fail(404, "Message not found");
+  }
+
+  const current = msgSnap.data().reactions || {};
+  const isRemoving = current[uid] === emoji;
+
+  await messageRef.update({
+    [`reactions.${uid}`]: isRemoving ? FieldValue.delete() : emoji
+  });
+}
+
+/** Re-sends the source message's text into a new conversation with `toUid`, tagged with who it originally came from. */
+export async function forwardMessage(uid, convoId, messageId, toUid) {
+  const db = getFirestore();
+  await assertParticipant(uid, convoId);
+
+  const msgSnap = await db.collection("conversations").doc(convoId).collection("messages").doc(messageId).get();
+
+  if (!msgSnap.exists || msgSnap.data().deleted) {
+    throw fail(404, "Message not found");
+  }
+
+  const original = msgSnap.data();
+  const originalSenderSnap = await db.collection("users").doc(original.senderUid).get();
+  const originalSenderName = originalSenderSnap.data()?.displayName || "Someone";
+
+  return sendMessage(uid, toUid, original.text, { forwardedFrom: originalSenderName });
+}
+
+/** Advances my own read cursor for this conversation to now — the other participant's unread count is derived by comparing message timestamps against this on read. */
+export async function markConversationRead(uid, convoId) {
+  const db = getFirestore();
+  await assertParticipant(uid, convoId);
+
+  await db.collection("conversations").doc(convoId).update({
+    [`lastRead.${uid}`]: new Date()
+  });
+}
+
+/** Stamps "I'm typing" with a timestamp rather than a boolean, so a client that never sends an explicit "stopped" event still self-expires — the reader just treats anything older than a few seconds as not-typing. */
+export async function setTyping(uid, convoId) {
+  const db = getFirestore();
+  await assertParticipant(uid, convoId);
+
+  await db.collection("conversations").doc(convoId).update({
+    [`typing.${uid}`]: new Date()
   });
 }
