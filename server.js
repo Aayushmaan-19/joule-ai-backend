@@ -9,6 +9,7 @@ import imageRoutes from "./Routes/image.js";
 import wakeRoutes from "./Routes/wake.js";
 import socialRoutes from "./Routes/social.js";
 import profileRoutes from "./Routes/profile.js";
+import adminRoutes from "./Routes/admin.js";
 
 const app = express();
 
@@ -50,9 +51,18 @@ app.use(express.json({ limit: "10kb" }));
 // cooldown in auth.js does nothing against someone rotating addresses, so
 // cap them per IP. This must be mounted BEFORE the auth router: Express only
 // applies middleware to requests that pass through it.
+//
+// Limits are per IP, and a whole classroom on one Wi-Fi shares one IP. The
+// defaults suit the public internet; raise them with env vars on Render
+// (SIGNUP_RATE_LIMIT_MAX / API_RATE_LIMIT_MAX) for a demo or presentation.
+const envInt = (name, fallback) => {
+  const n = Number.parseInt(process.env[name], 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
 const signupLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: envInt("SIGNUP_RATE_LIMIT_MAX", 10),
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -64,10 +74,13 @@ const signupLimiter = rateLimit({
 app.use("/api/auth/signup", signupLimiter);
 app.use("/api/auth", authRoutes);
 app.use("/api/wake", wakeRoutes);
+// Token-protected and admin-only, so it sits ahead of the shared IP limiter
+// (the console makes several calls per click).
+app.use("/api/admin", adminRoutes);
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 50
+  max: envInt("API_RATE_LIMIT_MAX", 50)
 });
 
 app.use(limiter);

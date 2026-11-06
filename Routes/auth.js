@@ -5,6 +5,8 @@ import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import "../Services/firebase.js";
 import { sendOtpEmail, generateOtp } from "../Services/mailer.js";
+import { ensureUserIdentity } from "../Services/userIdentity.js";
+import { isAdminToken } from "../middleware/requireAdmin.js";
 
 const router = express.Router();
 
@@ -16,6 +18,34 @@ router.get("/me", verifyFirebase, (req, res) => {
     success: true,
     user: req.user
   });
+});
+
+/**
+ * Called by the frontend after every sign-in (email, Google, or an admin's
+ * "open as user"). This is the single place a user's Firestore profile is
+ * created or topped up — so Google accounts get exactly the same document
+ * as email accounts, with a readable id — and it tells the client whether
+ * this person is an admin. A session an admin opened as another user does
+ * not touch that user's profile.
+ */
+router.post("/session", verifyFirebase, async (req, res) => {
+  try {
+    const impersonatedBy = req.user.impersonatedBy || null;
+
+    const identity = impersonatedBy
+      ? null
+      : await ensureUserIdentity(req.user.uid, req.user);
+
+    return res.json({
+      success: true,
+      readableId: identity?.readableId || null,
+      isAdmin: isAdminToken(req.user),
+      impersonatedBy
+    });
+  } catch (err) {
+    console.error("SESSION SYNC ERROR:", err.message);
+    return res.status(500).json({ success: false, message: "Couldn't sync your profile" });
+  }
 });
 
 /* =========================================================
@@ -183,17 +213,8 @@ router.post("/signup/verify-otp", async (req, res) => {
       emailVerified: true
     });
 
-    await db.collection("users").doc(userRecord.uid).set({
-      uid: userRecord.uid,
-      email: data.email,
-      createdAt: new Date(),
-      plan: "free",
-      messagesUsed: 0,
-      voiceUsed: 0,
-      emailVerified: true,
-      followerCount: 0,
-      followingCount: 0
-    });
+    // Creates users/{uid} (same fields as before) plus its readable id.
+    await ensureUserIdentity(userRecord.uid, { email: data.email, email_verified: true });
 
     await otpRef.delete();
 
