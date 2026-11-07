@@ -10,6 +10,7 @@ import wakeRoutes from "./Routes/wake.js";
 import socialRoutes from "./Routes/social.js";
 import profileRoutes from "./Routes/profile.js";
 import adminRoutes from "./Routes/admin.js";
+import avatarRoutes from "./Routes/avatars.js";
 
 const app = express();
 
@@ -77,6 +78,9 @@ app.use("/api/wake", wakeRoutes);
 // Token-protected and admin-only, so it sits ahead of the shared IP limiter
 // (the console makes several calls per click).
 app.use("/api/admin", adminRoutes);
+// Public read-only profile pictures. A page of avatars is dozens of requests,
+// which would use up the shared limiter below, so this sits ahead of it.
+app.use("/api/avatars", avatarRoutes);
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,

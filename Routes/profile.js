@@ -2,7 +2,7 @@ import express from "express";
 import multer from "multer";
 import { getFirestore } from "firebase-admin/firestore";
 import verifyFirebase from "../middleware/verifyFirebase.js";
-import { uploadAvatar } from "../Services/storage.js";
+import { saveAvatar } from "../Services/avatarStore.js";
 
 const router = express.Router();
 
@@ -25,7 +25,11 @@ router.post("/avatar", upload.single("avatar"), async (req, res) => {
       return res.status(400).json({ error: "No image provided" });
     }
 
-    const { url } = await uploadAvatar(req.user.uid, req.file.buffer, req.file.mimetype);
+    const version = await saveAvatar(req.user.uid, req.file.buffer, req.file.mimetype);
+
+    // Served by Routes/avatars.js on this same backend (trust proxy makes
+    // req.protocol "https" behind Render).
+    const url = `${req.protocol}://${req.get("host")}/api/avatars/${req.user.uid}?v=${version}`;
 
     await getFirestore()
       .collection("users")
@@ -34,6 +38,10 @@ router.post("/avatar", upload.single("avatar"), async (req, res) => {
 
     return res.json({ avatar: url });
   } catch (err) {
+    if (err.status === 400) {
+      return res.status(400).json({ error: err.message });
+    }
+
     console.error("Avatar upload error:", err.message);
     return res.status(500).json({ error: "Couldn't upload your avatar. Please try again." });
   }
