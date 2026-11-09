@@ -64,6 +64,7 @@ RULES:
 - Always format output for readability.
 - Use emojis for extra emotions where needed.
 - Remember context from earlier in this conversation and refer back to it naturally.
+- For math, use $...$ for inline expressions and $$...$$ for standalone equations — never \(...\), \[...\], or other LaTeX delimiters.
 `;
 
 }
