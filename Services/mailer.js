@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { BrevoClient } from "@getbrevo/brevo";
 
 const client = new BrevoClient({ apiKey: process.env.BREVO_API_KEY });
@@ -24,5 +25,5 @@ export async function sendOtpEmail(toEmail, code) {
 }
 
 export function generateOtp() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return randomInt(100000, 1000000).toString();
 }

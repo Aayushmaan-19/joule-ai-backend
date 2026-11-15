@@ -54,6 +54,13 @@ router.post("/session", verifyFirebase, async (req, res) => {
    keyed by email address in a dedicated "signupOtps" collection.
    The account is only created in Firebase Auth AFTER the code
    is verified — never before.
+
+   The password is NEVER written to Firestore. send-otp only
+   checks that it looks valid; the client re-submits it with
+   verify-otp, and it's used in-memory for a single createUser()
+   call and then discarded. This means a plaintext password is
+   never at rest anywhere server-side, even for the few minutes
+   a pending signup is open.
 ========================================================= */
 
 function normalizeEmail(email) {
@@ -66,23 +73,16 @@ function isValidEmail(email) {
 
 /**
  * Sends a 6-digit OTP to an email address BEFORE any account exists.
- * Body: { email, password }
- * The password is stored alongside the OTP (server-side only, never
- * returned to the client) so it can be used to create the account
- * once the code is verified — this is the one and only place the
- * account gets created.
+ * Body: { email }
+ * The password is collected later, at verify-otp — never here, and
+ * never written to Firestore at any point in this flow.
  */
 router.post("/signup/send-otp", async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
-    const password = req.body.password;
 
     if (!email || !isValidEmail(email)) {
       return res.status(400).json({ success: false, message: "Valid email is required" });
-    }
-
-    if (!password || typeof password !== "string" || password.length < 6) {
-      return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
     }
 
     // Reject if an account with this email already exists
@@ -122,7 +122,6 @@ router.post("/signup/send-otp", async (req, res) => {
     await otpRef.set({
       code,
       email,
-      password, // server-side only — used once to create the account on verify
       sentAt: new Date(now),
       expiresAt: new Date(now + OTP_EXPIRY_MS),
       attempts: 0
@@ -155,6 +154,7 @@ router.post("/signup/verify-otp", async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
     const code = req.body.code;
+    const password = req.body.password;
 
     if (!email || !isValidEmail(email)) {
       return res.status(400).json({ success: false, message: "Valid email is required" });
@@ -162,6 +162,10 @@ router.post("/signup/verify-otp", async (req, res) => {
 
     if (!code || typeof code !== "string" || code.trim().length !== 6) {
       return res.status(400).json({ success: false, message: "Enter the 6-digit code" });
+    }
+
+    if (!password || typeof password !== "string" || password.length < 6) {
+      return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
     }
 
     const db = getFirestore();
@@ -207,9 +211,11 @@ router.post("/signup/verify-otp", async (req, res) => {
 
     // Code is correct — THIS is the one and only place a signup
     // account gets created. No account exists before this point.
+    // `password` came from this request's body, never from Firestore —
+    // it was never written there in the first place.
     const userRecord = await getAuth().createUser({
       email: data.email,
-      password: data.password,
+      password,
       emailVerified: true
     });
 

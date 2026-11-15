@@ -108,8 +108,7 @@ export async function getUserDetail(uid) {
         return {
           id: d.id,
           with: who(otherUid),
-          lastMessageAt: iso(data.updatedAt),
-          lastMessagePreview: data.lastMessage?.deleted ? "(deleted)" : (data.lastMessage?.text || "").slice(0, 80)
+          lastMessageAt: iso(data.updatedAt)
         };
       })
       .sort((a, b) => String(b.lastMessageAt || "").localeCompare(String(a.lastMessageAt || "")))
